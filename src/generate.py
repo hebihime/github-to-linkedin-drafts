@@ -194,6 +194,7 @@ def _complete_gemini(cfg: LLMConfig, system_prompt: str, user_prompt: str) -> st
                 temperature=cfg.temperature,
                 max_output_tokens=cfg.max_output_tokens,
                 response_mime_type="application/json",
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
             ),
         )
     except Exception as exc:  # google-genai raises a variety of types
