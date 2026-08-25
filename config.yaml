@@ -1,0 +1,165 @@
+# github-to-linkedin-drafts configuration
+# Secrets stay in the environment — never put API keys in this file.
+
+github:
+  # Whose activity to watch. In Actions this falls back to GITHUB_REPOSITORY_OWNER.
+  username: "hebihime"
+  lookback_hours: 48
+  include_private: false
+  allowed_private_repos: []          # e.g. ["you/private-app"]
+  output_repo: ""                    # owner/name; empty = GITHUB_REPOSITORY
+  only_default_branch_pushes: true
+  interesting_event_types:
+    - PushEvent
+    - PullRequestEvent
+    - ReleaseEvent
+    - CreateEvent
+
+filters:
+  bot_authors:
+    - dependabot
+    - dependabot[bot]
+    - renovate
+    - renovate[bot]
+    - github-actions
+    - github-actions[bot]
+    - greenkeeper
+    - greenkeeper[bot]
+    - imgbot
+    - imgbot[bot]
+    - snyk-bot
+    - codecov
+    - pre-commit-ci
+    - pre-commit-ci[bot]
+    - mergify
+    - mergify[bot]
+    - semantic-release-bot
+  drop_commit_types:
+    - chore
+    - docs
+    - ci
+    - test
+    - style
+    - build
+    - deps
+    - bump
+  min_lines_changed: 15
+  min_files_changed: 1
+  # feat / fix / perf / breaking can be tiny and still worth posting
+  min_lines_for_signal_types: 1
+  drop_prereleases: false
+  drop_tag_creates_if_release_exists: true
+
+scoring:
+  # Component weights. The scorer sums these and clamps to 0–100.
+  event_type:
+    ReleaseEvent: 40
+    PullRequestEvent: 30
+    PushEvent: 18
+    CreateEvent: 10
+    NewRepository: 55          # public repo CreateEvent; drafts by default
+    default: 5
+  lines_changed:
+    weight: 15
+    midpoint: 200          # ~full weight at this many lines
+  files_changed:
+    weight: 8
+    midpoint: 10
+  conventional:
+    feat: 12
+    fix: 8
+    perf: 10
+    breaking: 18
+    refactor: 4
+  keywords:
+    positive:
+      - launch
+      - release
+      - shipped
+      - shipping
+      - performance
+      - security
+      - breaking
+      - api
+      - feature
+      - milestone
+      - production
+      - opensource
+      - open-source
+      - open source
+      - rfc
+      - benchmark
+      - latency
+      - throughput
+      - migration
+      - announcing
+    negative:
+      - wip
+      - tmp
+      - temp
+      - typo
+      - formatting
+      - lint
+      - rebase
+      - trivial
+      - nit
+      - bump version
+      - bump the
+      - lockfile
+      - gitignore
+    positive_weight: 3
+    negative_weight: -8
+    positive_cap: 9
+  quality:
+    title_min_chars: 20
+    body_min_chars: 80
+    title_bonus: 4
+    body_bonus: 6
+    weak_titles:
+      - update
+      - updates
+      - fix
+      - fixes
+      - wip
+      - misc
+      - changes
+      - minor
+  repo_popularity:
+    weight: 10
+    midpoint: 500          # ~full weight at this many stars
+  frequency_penalty:
+    hours_window: 24
+    max_penalty: 15
+  non_default_branch_penalty: 6
+  draft_threshold: 55
+  high_confidence_threshold: 75
+
+llm:
+  # gemini (default) | openai | grok | openrouter | openai_compatible
+  provider: gemini
+  model: gemini-2.5-flash
+  temperature: 0.65
+  max_output_tokens: 2048
+  # For openai / grok / openrouter / openai_compatible:
+  # base_url: https://api.openai.com/v1
+  # api_key_env: OPENAI_API_KEY
+  system_prompt_path: prompts/linkedin_system.md
+  user_prompt_path: prompts/linkedin_user.md
+
+output:
+  create_github_issue: true
+  issue_labels:
+    - linkedin-draft
+  write_markdown: false
+  markdown_dir: drafts
+  max_drafts_per_run: 1
+
+linkedin:
+  # Opt-in. Leave false unless you have LINKEDIN_ACCESS_TOKEN configured.
+  auto_post: false
+  person_urn: ""           # optional; resolved from the token via /v2/userinfo
+
+state:
+  path: .github-to-linkedin-state.json
+  max_processed_ids: 2000
+  commit_in_ci: true

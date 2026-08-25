@@ -1,0 +1,92 @@
+name: GitHub to LinkedIn Drafts
+
+on:
+  schedule:
+    # Daily at 14:00 UTC. Tune to your posting timezone.
+    - cron: "0 14 * * *"
+  release:
+    types: [published]
+  pull_request:
+    types: [closed]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Score + generate, but do not create an issue or write state"
+        type: boolean
+        default: false
+      score_only:
+        description: "Stop after scoring (no LLM call)"
+        type: boolean
+        default: false
+      lookback_hours:
+        description: "Override lookback window (hours). Empty uses config.yaml."
+        required: false
+        type: string
+
+permissions:
+  contents: write   # persist .github-to-linkedin-state.json
+  issues: write     # create LinkedIn draft issues
+
+concurrency:
+  group: github-to-linkedin-drafts
+  cancel-in-progress: false
+
+jobs:
+  draft:
+    name: Collect, score, draft
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name != 'pull_request'
+      || github.event.pull_request.merged == true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -r requirements.txt
+
+      - name: Run pipeline
+        env:
+          # Prefer a user PAT (GH_PAT) so /users/{username}/events includes
+          # private activity. GITHUB_TOKEN is enough for public events + issues.
+          GH_PAT: ${{ secrets.GH_PAT }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          LINKEDIN_ACCESS_TOKEN: ${{ secrets.LINKEDIN_ACCESS_TOKEN }}
+          LINKEDIN_PERSON_URN: ${{ secrets.LINKEDIN_PERSON_URN }}
+          GITHUB_USERNAME: ${{ vars.GITHUB_USERNAME }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+          SCORE_ONLY: ${{ github.event.inputs.score_only || 'false' }}
+        run: |
+          set -euo pipefail
+          extra=()
+          if [[ "${{ github.event.inputs.lookback_hours }}" != "" ]]; then
+            extra+=(--lookback-hours "${{ github.event.inputs.lookback_hours }}")
+          fi
+          python -m src.main "${extra[@]}"
+
+      - name: Persist state
+        if: success() && github.event.inputs.dry_run != 'true' && github.event.inputs.score_only != 'true'
+        run: |
+          set -euo pipefail
+          git add .github-to-linkedin-state.json
+          if git diff --cached --quiet; then
+            echo "State file unchanged."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore: update linkedin-drafts state"
+          git push
