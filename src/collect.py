@@ -3,6 +3,11 @@
 Primary source: GET /users/{username}/events (one install covers all of a
 user's activity). Also ingest the Actions workflow payload so Release and
 merged-PR triggers are not lost to Events API latency.
+
+GitHub documents Events API delay of up to several hours, and in practice
+new public repos can be missing entirely. A second pass lists the user's
+recently pushed owner repos and synthesizes CreateEvent / PushEvent from
+the commits API so a ship is not dropped because the timeline is stale.
 """
 
 from __future__ import annotations
@@ -38,6 +43,7 @@ def collect_activity(
     events: list[ActivityEvent] = []
     events.extend(_collect_user_events(client, username, since, cfg))
     events.extend(_collect_workflow_payload(since, cfg))
+    events.extend(_collect_recent_repo_activity(client, username, since, cfg))
     events = _dedupe(events)
     events.sort(key=lambda e: e.created_at, reverse=True)
     log.info(
@@ -58,6 +64,8 @@ def _collect_user_events(
     interesting = set(cfg.github.interesting_event_types)
     collected: list[ActivityEvent] = []
     stopped_early = False
+    newest: tuple[datetime, str, str] | None = None
+    scanned = 0
     try:
         for raw in client.paginate(
             f"/users/{username}/events",
@@ -69,10 +77,14 @@ def _collect_user_events(
             created = parse_dt(raw.get("created_at"))
             if created is None:
                 continue
+            scanned += 1
+            event_type = str(raw.get("type") or "")
+            repo_name = str((raw.get("repo") or {}).get("name") or "")
+            if newest is None:
+                newest = (created, event_type, repo_name)
             if created < since:
                 stopped_early = True
                 break
-            event_type = str(raw.get("type") or "")
             if interesting and event_type not in interesting:
                 continue
             parsed = _from_events_api(raw)
@@ -85,11 +97,22 @@ def _collect_user_events(
                 status=404,
             ) from exc
         raise
-    log.info(
-        "Events API returned %s interesting events%s",
-        len(collected),
-        " (stopped at lookback boundary)" if stopped_early else "",
-    )
+    extra = " (stopped at lookback boundary)" if stopped_early else ""
+    log.info("Events API returned %s interesting events%s", len(collected), extra)
+    if newest is not None:
+        created, event_type, repo_name = newest
+        log.info(
+            "Events API newest=%s type=%s repo=%s scanned=%s",
+            created.isoformat(),
+            event_type,
+            repo_name or "?",
+            scanned,
+        )
+        if created < since:
+            log.info(
+                "Events API is behind since=%s; scanning recently pushed repos next",
+                since.isoformat(),
+            )
     return collected
 
 
@@ -300,15 +323,238 @@ def _commits_from_push(payload: dict[str, Any]) -> list[CommitSummary]:
     return out
 
 
+def _collect_recent_repo_activity(
+    client: GitHubClient,
+    username: str,
+    since: datetime,
+    cfg: AppConfig,
+) -> list[ActivityEvent]:
+    """Owner repos pushed (or created) since `since`, via the repos + commits APIs."""
+    collected: list[ActivityEvent] = []
+    scanned = 0
+    try:
+        for raw in client.paginate(
+            f"/users/{username}/repos",
+            params={"type": "owner", "sort": "pushed", "direction": "desc"},
+            max_pages=2,
+            per_page=50,
+        ):
+            if not isinstance(raw, dict):
+                continue
+            scanned += 1
+            pushed_at = parse_dt(raw.get("pushed_at"))
+            created_at = parse_dt(raw.get("created_at"))
+            if pushed_at is not None and pushed_at < since:
+                break
+            parsed = _events_from_owner_repo(client, raw, username, since, cfg, created_at)
+            collected.extend(parsed)
+    except GitHubError as exc:
+        log.warning("Recent-repo scan failed (%s); continuing with Events API results", exc)
+        return collected
+    log.info(
+        "Recent-repo scan returned %s events from %s repos",
+        len(collected),
+        scanned,
+    )
+    return collected
+
+
+def _events_from_owner_repo(
+    client: GitHubClient,
+    raw: dict[str, Any],
+    username: str,
+    since: datetime,
+    cfg: AppConfig,
+    created_at: datetime | None,
+) -> list[ActivityEvent]:
+    if raw.get("fork"):
+        return []
+    full_name = str(raw.get("full_name") or "")
+    if not full_name:
+        return []
+    if raw.get("private"):
+        allowed = {r.lower() for r in cfg.github.allowed_private_repos}
+        if not cfg.github.include_private and full_name.lower() not in allowed:
+            return []
+
+    events: list[ActivityEvent] = []
+    if created_at is not None and created_at >= since:
+        created = _from_new_repo(raw, created_at)
+        if created is not None:
+            events.append(created)
+    events.extend(_push_from_recent_commits(client, raw, username, since))
+    return events
+
+
+def _from_new_repo(raw: dict[str, Any], created_at: datetime) -> ActivityEvent | None:
+    full_name = str(raw.get("full_name") or "")
+    if not full_name:
+        return None
+    owner = (raw.get("owner") or {}).get("login") or ""
+    description = str(raw.get("description") or "")
+    return ActivityEvent(
+        id=f"created-repo:{full_name.lower()}",
+        event_type="CreateEvent",
+        created_at=created_at,
+        repo_full_name=full_name,
+        actor_login=str(owner),
+        title=f"Created repository {full_name}",
+        body=description,
+        html_url=str(raw.get("html_url") or f"https://github.com/{full_name}"),
+        payload={"ref": None, "ref_type": "repository", "description": description},
+        repo_private=bool(raw.get("private")),
+        repo_stars=int(raw.get("stargazers_count") or 0),
+        repo_forks=int(raw.get("forks_count") or 0),
+        repo_description=description,
+        default_branch=str(raw.get("default_branch") or "") or None,
+    )
+
+
+def _push_from_recent_commits(
+    client: GitHubClient,
+    repo: dict[str, Any],
+    username: str,
+    since: datetime,
+) -> list[ActivityEvent]:
+    full_name = str(repo.get("full_name") or "")
+    default_branch = str(repo.get("default_branch") or "main")
+    if not full_name:
+        return []
+    raw_commits: list[dict[str, Any]] = []
+    since_param = since.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    try:
+        for raw in client.paginate(
+            f"/repos/{full_name}/commits",
+            params={"since": since_param, "sha": default_branch},
+            max_pages=2,
+            per_page=100,
+        ):
+            if isinstance(raw, dict):
+                raw_commits.append(raw)
+    except GitHubError as exc:
+        if exc.status in {404, 409}:
+            return []
+        log.warning("Commits listing failed for %s: %s", full_name, exc)
+        return []
+    event = push_event_from_commits(
+        raw_commits,
+        repo_full_name=full_name,
+        username=username,
+        default_branch=default_branch,
+        html_url=str(repo.get("html_url") or f"https://github.com/{full_name}"),
+        repo_private=bool(repo.get("private")),
+        repo_stars=int(repo.get("stargazers_count") or 0),
+        repo_forks=int(repo.get("forks_count") or 0),
+        repo_description=str(repo.get("description") or ""),
+    )
+    return [event] if event is not None else []
+
+
+def push_event_from_commits(
+    raw_commits: list[dict[str, Any]],
+    *,
+    repo_full_name: str,
+    username: str,
+    default_branch: str,
+    html_url: str,
+    repo_private: bool = False,
+    repo_stars: int = 0,
+    repo_forks: int = 0,
+    repo_description: str = "",
+) -> ActivityEvent | None:
+    """Build one PushEvent from commits API rows (newest first). Public for tests."""
+    wanted = username.lower()
+    summaries: list[tuple[CommitSummary, datetime, str | None]] = []
+    for raw in raw_commits:
+        parsed = _commit_from_api(raw, wanted)
+        if parsed is not None:
+            summaries.append(parsed)
+    if not summaries:
+        return None
+    head_summary, head_at, _head_parent = summaries[0]
+    _oldest_summary, _oldest_at, oldest_parent = summaries[-1]
+    commits = [item[0] for item in summaries]
+    messages = [c.message for c in reversed(commits)]
+    head_msg = commits[0].message
+    title = head_msg.split("\n", 1)[0][:200] if head_msg else "Push"
+    return ActivityEvent(
+        id=f"push:{repo_full_name.lower()}:{head_summary.sha[:40]}",
+        event_type="PushEvent",
+        created_at=head_at,
+        repo_full_name=repo_full_name,
+        actor_login=username,
+        title=title,
+        body="\n\n".join(messages),
+        html_url=f"{html_url}/commits/{default_branch}" if html_url else "",
+        commits=commits,
+        payload={"ref": f"refs/heads/{default_branch}", "commits": []},
+        ref=f"refs/heads/{default_branch}",
+        before_sha=oldest_parent,
+        head_sha=head_summary.sha[:40],
+        default_branch=default_branch,
+        repo_private=repo_private,
+        repo_stars=repo_stars,
+        repo_forks=repo_forks,
+        repo_description=repo_description,
+    )
+
+
+def _commit_from_api(
+    raw: dict[str, Any], wanted_login: str
+) -> tuple[CommitSummary, datetime, str | None] | None:
+    login = ""
+    author = raw.get("author")
+    if isinstance(author, dict):
+        login = str(author.get("login") or "")
+    committer = raw.get("committer")
+    if not login and isinstance(committer, dict):
+        login = str(committer.get("login") or "")
+    if login.lower() != wanted_login:
+        return None
+    commit = raw.get("commit") if isinstance(raw.get("commit"), dict) else {}
+    message = str(commit.get("message") or "")
+    created = parse_dt((commit.get("committer") or {}).get("date") if isinstance(commit, dict) else None)
+    if created is None:
+        created = parse_dt((commit.get("author") or {}).get("date") if isinstance(commit, dict) else None)
+    if created is None:
+        return None
+    parents = raw.get("parents") if isinstance(raw.get("parents"), list) else []
+    parent_sha = None
+    if parents and isinstance(parents[0], dict):
+        parent_sha = _sha(parents[0].get("sha"))
+    return (
+        CommitSummary(
+            sha=str(raw.get("sha") or "")[:40],
+            message=message,
+            author_login=login or None,
+        ),
+        created,
+        parent_sha,
+    )
+
+
 def _dedupe(events: list[ActivityEvent]) -> list[ActivityEvent]:
     seen: set[str] = set()
     out: list[ActivityEvent] = []
-    for event in events:
-        if event.id in seen:
+    # Prefer GitHub Events API ids, then workflow payloads, then synthesized events.
+    ordered = sorted(events, key=_source_rank)
+    for event in ordered:
+        keys = event.identity_keys()
+        if any(key in seen for key in keys):
             continue
-        seen.add(event.id)
+        seen.update(keys)
         out.append(event)
     return out
+
+
+def _source_rank(event: ActivityEvent) -> tuple[int, datetime]:
+    if event.id.isdigit():
+        rank = 0
+    elif event.id.startswith("workflow:"):
+        rank = 1
+    else:
+        rank = 2
+    return (rank, event.created_at)
 
 
 def _sha(value: Any) -> str | None:

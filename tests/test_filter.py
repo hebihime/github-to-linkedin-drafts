@@ -39,6 +39,19 @@ def test_drops_already_processed(cfg) -> None:
     assert result.dropped["already_processed"] == 1
 
 
+def test_drops_already_processed_push_fingerprint(cfg) -> None:
+    event = make_event(
+        event_id="999888",
+        event_type="PushEvent",
+        repo="acme/app",
+        title="feat: add export API",
+    )
+    event.head_sha = "b" * 40
+    state = PipelineState(processed_event_ids=["push:acme/app:" + "b" * 40])
+    result = apply_hard_filters([event], cfg, state)
+    assert result.dropped["already_processed"] == 1
+
+
 def test_drops_unmerged_pr(cfg) -> None:
     event = make_event(merged=False, title="feat: not merged yet")
     result = apply_hard_filters([event], cfg, PipelineState())

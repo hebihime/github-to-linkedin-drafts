@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from src.collect import _from_events_api
+from datetime import datetime, timezone
+
+from src.collect import _dedupe, _from_events_api, _from_new_repo, push_event_from_commits
+from src.models import ActivityEvent
 
 
 def test_parse_push_event() -> None:
@@ -106,3 +109,101 @@ def test_parse_new_repository_create() -> None:
 
 def test_skips_malformed() -> None:
     assert _from_events_api({"type": "PushEvent"}) is None
+
+
+def test_from_new_repo_is_create_event() -> None:
+    created = datetime(2026, 8, 29, 2, 34, 24, tzinfo=timezone.utc)
+    event = _from_new_repo(
+        {
+            "full_name": "hebihime/web3-restaurant-api",
+            "owner": {"login": "hebihime"},
+            "description": "x402 pizza demo",
+            "html_url": "https://github.com/hebihime/web3-restaurant-api",
+            "private": False,
+            "stargazers_count": 0,
+            "forks_count": 0,
+            "default_branch": "main",
+        },
+        created,
+    )
+    assert event is not None
+    assert event.event_type == "CreateEvent"
+    assert event.payload["ref_type"] == "repository"
+    assert event.id == "created-repo:hebihime/web3-restaurant-api"
+    assert "created-repo:hebihime/web3-restaurant-api" in event.identity_keys()
+
+
+def test_push_event_from_commits_keeps_user_commits_only() -> None:
+    raw = [
+        {
+            "sha": "aa" * 20,
+            "commit": {
+                "message": "feat: show menu placeholders",
+                "committer": {"date": "2026-08-29T08:58:33Z"},
+            },
+            "author": {"login": "hebihime"},
+            "parents": [{"sha": "bb" * 20}],
+        },
+        {
+            "sha": "cc" * 20,
+            "commit": {
+                "message": "chore: update linkedin-drafts state",
+                "committer": {"date": "2026-08-29T08:44:08Z"},
+            },
+            "author": {"login": "github-actions[bot]"},
+            "parents": [{"sha": "dd" * 20}],
+        },
+        {
+            "sha": "ee" * 20,
+            "commit": {
+                "message": "feat: make order a normal menu",
+                "committer": {"date": "2026-08-29T07:55:39Z"},
+            },
+            "author": {"login": "hebihime"},
+            "parents": [{"sha": "ff" * 20}],
+        },
+    ]
+    event = push_event_from_commits(
+        raw,
+        repo_full_name="hebihime/web3-restaurant-api",
+        username="hebihime",
+        default_branch="main",
+        html_url="https://github.com/hebihime/web3-restaurant-api",
+    )
+    assert event is not None
+    assert event.event_type == "PushEvent"
+    assert event.head_sha == "aa" * 20
+    assert event.before_sha == "ff" * 20
+    assert [c.author_login for c in event.commits] == ["hebihime", "hebihime"]
+    assert event.title.startswith("feat: show menu placeholders")
+    assert event.id.startswith("push:hebihime/web3-restaurant-api:")
+    assert event.id in event.identity_keys()
+
+
+def test_dedupe_prefers_events_api_over_synthetic_push() -> None:
+    created = datetime(2026, 8, 29, 9, 0, tzinfo=timezone.utc)
+    api = ActivityEvent(
+        id="555",
+        event_type="PushEvent",
+        created_at=created,
+        repo_full_name="acme/app",
+        actor_login="jane",
+        title="feat: add export API",
+        body="",
+        html_url="https://github.com/acme/app",
+        head_sha="b" * 40,
+    )
+    synthetic = ActivityEvent(
+        id=f"push:acme/app:{'b' * 40}",
+        event_type="PushEvent",
+        created_at=created,
+        repo_full_name="acme/app",
+        actor_login="jane",
+        title="feat: add export API",
+        body="",
+        html_url="https://github.com/acme/app",
+        head_sha="b" * 40,
+    )
+    out = _dedupe([synthetic, api])
+    assert len(out) == 1
+    assert out[0].id == "555"

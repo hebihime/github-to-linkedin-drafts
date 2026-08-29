@@ -53,6 +53,25 @@ class ActivityEvent:
     def lines_changed(self) -> int:
         return self.additions + self.deletions
 
+    def identity_keys(self) -> list[str]:
+        """Stable ids so a delayed Events API hit is not drafted twice.
+
+        GitHub event ids are numeric and unique per delivery. Pushes also
+        fingerprint as push:{repo}:{head}; new repos as created-repo:{repo}.
+        """
+        keys = [self.id]
+        repo = self.repo_full_name.lower()
+        if self.event_type == "PushEvent" and self.head_sha and repo:
+            fingerprint = f"push:{repo}:{self.head_sha[:40]}"
+            if fingerprint not in keys:
+                keys.append(fingerprint)
+        ref_type = str(self.payload.get("ref_type") or "").lower()
+        if self.event_type == "CreateEvent" and ref_type == "repository" and repo:
+            fingerprint = f"created-repo:{repo}"
+            if fingerprint not in keys:
+                keys.append(fingerprint)
+        return keys
+
 
 @dataclass
 class FeatureVector:

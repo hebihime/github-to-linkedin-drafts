@@ -117,7 +117,7 @@ def _drop_reason(
     state: PipelineState,
     interesting: set[str],
 ) -> str | None:
-    if state.is_processed(event.id):
+    if any(state.is_processed(key) for key in event.identity_keys()):
         return "already_processed"
     if interesting and event.event_type not in interesting:
         return "event_type"

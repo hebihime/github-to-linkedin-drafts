@@ -140,7 +140,7 @@ def _pipeline(
 ) -> int:
     events = collect_activity(read_client, cfg, since)
     events = drop_redundant_tag_creates(events, cfg)
-    collected_ids = [e.id for e in events]
+    collected_ids = [key for event in events for key in event.identity_keys()]
 
     filtered = apply_hard_filters(events, cfg, state)
     # Events API does not flag private repos or default branch; fill those first.
@@ -198,12 +198,17 @@ def _pipeline(
 def _lookback_since(cfg: AppConfig, state: PipelineState) -> datetime:
     now = utcnow()
     floor = now - timedelta(hours=cfg.github.lookback_hours)
-    if state.last_success_at is None:
-        return floor
-    # More recent of (lookback window, last success): don't re-scan 48h after a
-    # run 6h ago; don't try to scan 5 days if the last success is stale.
-    since = max(floor, state.last_success_at)
-    return since.replace(tzinfo=since.tzinfo or timezone.utc)
+    # Always scan the full lookback window. GitHub's Events API can lag by
+    # hours; clipping to last_success_at then permanently skips those events
+    # because their created_at is earlier than the empty run. Duplicates are
+    # handled by processed event ids (including push/repo fingerprints).
+    if state.last_success_at is not None:
+        log.debug(
+            "last_success_at=%s (window is lookback_hours=%s, not last success)",
+            format_dt(state.last_success_at),
+            cfg.github.lookback_hours,
+        )
+    return floor.replace(tzinfo=floor.tzinfo or timezone.utc)
 
 
 def _setup_logging(*, verbose: bool) -> None:

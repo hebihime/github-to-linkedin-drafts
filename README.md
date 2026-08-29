@@ -16,7 +16,7 @@ GitHub’s [user Events API](https://docs.github.com/en/rest/activity/events) (`
 
 The workflow also listens for `release` published and `pull_request` closed (merged) on **this** repository, so those triggers are not lost to Events API latency. They are extra, not the primary source.
 
-Events older than ~30 days, or beyond the most recent 300, are not available from GitHub. The default lookback is 48 hours, or since the last successful run — whichever is more recent.
+Events older than ~30 days, or beyond the most recent 300, are not available from GitHub. The default lookback is 48 hours. Processed event IDs (and push/repo fingerprints) prevent double-drafts; the window is **not** clipped to last success, because the Events API can lag by hours and a new public repo may be missing from the timeline entirely. A second pass lists recently pushed owner repos and reads their commits.
 
 ## Quick start (GitHub Actions)
 
