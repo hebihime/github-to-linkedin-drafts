@@ -45,6 +45,21 @@ def test_release_scores_above_draft_threshold(cfg, empty_state) -> None:
     assert scored.breakdown.components["event_type"] == cfg.scoring.event_type.ReleaseEvent
 
 
+def test_readme_keywords_do_not_affect_score(cfg, empty_state) -> None:
+    event = make_event(
+        event_id="new-1",
+        event_type="CreateEvent",
+        title="Created repository acme/menu-wrap",
+        body="short description of a wrap",
+        repo="acme/menu-wrap",
+    )
+    event.payload = {"ref_type": "repository"}
+    plain = score_event(event, extract_features(event, cfg, empty_state), cfg)
+    event.readme = "launch release shipped production announcing milestone open-source"
+    with_readme = score_event(event, extract_features(event, cfg, empty_state), cfg)
+    assert with_readme.score == plain.score
+
+
 def test_wip_keyword_penalizes(cfg, empty_state) -> None:
     clean = make_event(event_id="a", title="feat: add export API")
     noisy = make_event(event_id="b", title="feat: add export API (wip tmp)")

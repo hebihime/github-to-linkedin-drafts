@@ -181,9 +181,10 @@ class ScoringConfig:
 @dataclass(frozen=True)
 class LLMConfig:
     provider: str = "gemini"
-    model: str = "gemini-2.5-flash"
+    model: str = "gemini-3.7-flash"
     temperature: float = 0.65
-    max_output_tokens: int = 2048
+    max_output_tokens: int = 8192
+    thinking_level: str = "medium"  # Gemini 3.x: low | medium | high; empty = SDK default
     base_url: str = ""
     api_key_env: str = ""
     system_prompt_path: str = "prompts/linkedin_system.md"
@@ -347,9 +348,10 @@ def _parse_config(raw: dict[str, Any]) -> AppConfig:
     llm_raw = raw.get("llm") or {}
     llm = LLMConfig(
         provider=str(llm_raw.get("provider") or "gemini").strip().lower(),
-        model=str(llm_raw.get("model") or "gemini-2.5-flash").strip(),
+        model=str(llm_raw.get("model") or "gemini-3.7-flash").strip(),
         temperature=float(llm_raw.get("temperature", 0.65)),
-        max_output_tokens=int(llm_raw.get("max_output_tokens", 2048)),
+        max_output_tokens=int(llm_raw.get("max_output_tokens", 8192)),
+        thinking_level=str(llm_raw.get("thinking_level") or "medium").strip().lower(),
         base_url=str(llm_raw.get("base_url") or ""),
         api_key_env=str(llm_raw.get("api_key_env") or ""),
         system_prompt_path=str(llm_raw.get("system_prompt_path") or "prompts/linkedin_system.md"),

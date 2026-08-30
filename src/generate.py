@@ -16,6 +16,7 @@ from pathlib import Path
 import httpx
 
 from .config import AppConfig, LLMConfig, repo_root
+from .filter import is_new_repository
 from .models import Candidate, GeneratedDraft
 from .state import format_dt
 
@@ -120,6 +121,9 @@ def render_user_prompt(candidate: Candidate, cfg: AppConfig) -> str:
         "score_breakdown": breakdown,
         "supporting": supporting or "(none)",
         "repo_description": event.repo_description or "(none)",
+        "repo_readme": (event.readme or "").strip()[:4000]
+        or "(none — do not invent a thesis the brief does not contain)",
+        "lead_is_new_repo": "yes" if is_new_repository(event) else "no",
     }
     try:
         return template.format(**values)
@@ -184,7 +188,7 @@ def _complete_gemini(cfg: LLMConfig, system_prompt: str, user_prompt: str) -> st
 
     api_key = _api_key(cfg, ("GEMINI_API_KEY", "GOOGLE_API_KEY"))
     client = genai.Client(api_key=api_key)
-    log.info("Calling Gemini model=%s", cfg.model)
+    log.info("Calling Gemini model=%s thinking_level=%s", cfg.model, cfg.thinking_level or "default")
     try:
         response = client.models.generate_content(
             model=cfg.model,
@@ -194,7 +198,7 @@ def _complete_gemini(cfg: LLMConfig, system_prompt: str, user_prompt: str) -> st
                 temperature=cfg.temperature,
                 max_output_tokens=cfg.max_output_tokens,
                 response_mime_type="application/json",
-                thinking_config=types.ThinkingConfig(thinking_budget=0),
+                thinking_config=_gemini_thinking_config(cfg, types),
             ),
         )
     except Exception as exc:  # google-genai raises a variety of types
@@ -296,3 +300,23 @@ def _format_supporting(candidate: Candidate) -> str:
 
 def _word_count(text: str) -> int:
     return len(re.findall(r"\S+", text))
+
+
+def _gemini_thinking_config(cfg: LLMConfig, types: object) -> object:
+    """Gemini 3.7 wants thinking_level (low/medium/high). Budget 0 / minimal error."""
+    thinking = getattr(types, "ThinkingConfig", None)
+    if thinking is None:
+        raise GenerationError("google-genai ThinkingConfig is missing; upgrade google-genai")
+    level = (cfg.thinking_level or "").strip().lower()
+    if level in {"low", "medium", "high", "minimal"}:
+        try:
+            return thinking(thinking_level=level)
+        except TypeError:
+            log.warning(
+                "google-genai does not accept thinking_level=%s; falling back to thinking_budget",
+                level,
+            )
+    # 2.5-era path. Do not send budget=0 to Gemini 3.7 — it rejects it.
+    if cfg.model.startswith("gemini-3"):
+        return thinking(thinking_level="medium")
+    return thinking(thinking_budget=0)

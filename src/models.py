@@ -44,6 +44,7 @@ class ActivityEvent:
     repo_stars: int = 0
     repo_forks: int = 0
     repo_description: str = ""
+    readme: str = ""  # generation-only; never scored
     additions: int = 0
     deletions: int = 0
     files_changed: int = 0

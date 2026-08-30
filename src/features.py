@@ -6,6 +6,7 @@ pure fetch layer and scoring.py stays a pure function of features + weights.
 
 from __future__ import annotations
 
+import base64
 import logging
 import re
 from datetime import datetime
@@ -14,10 +15,12 @@ from typing import Any
 from .config import AppConfig, QualityWeights
 from .filter import is_breaking_message, is_new_repository, parse_conventional_prefix
 from .github_client import GitHubClient, GitHubError
-from .models import ActivityEvent, FeatureVector
+from .models import ActivityEvent, Candidate, FeatureVector
 from .state import PipelineState, utcnow
 
 log = logging.getLogger("github_to_linkedin.features")
+
+README_MAX_CHARS = 4000
 
 TYPE_RANK = {
     "breaking": 100,
@@ -82,6 +85,51 @@ def enrich_events(
     """Fill repo metadata + line/file stats. Failures skip the extra data, not the event."""
     enrich_repo_metadata(events, client)
     return enrich_diff_stats(events, client)
+
+
+def enrich_generation_context(candidate: Candidate, client: GitHubClient) -> None:
+    """Attach the repo README for the LLM. Does not affect scoring."""
+    event = candidate.lead.event
+    if event.readme.strip() or not event.repo_full_name:
+        return
+    try:
+        data = client.get_json(f"/repos/{event.repo_full_name}/readme")
+    except GitHubError as exc:
+        if exc.status == 404:
+            log.info("No README for %s", event.repo_full_name)
+            return
+        log.warning("README fetch failed for %s: %s", event.repo_full_name, exc)
+        return
+    if not isinstance(data, dict):
+        return
+    event.readme = decode_readme_payload(data, max_chars=README_MAX_CHARS)
+    if event.readme:
+        log.info(
+            "Attached README for %s (%s chars)",
+            event.repo_full_name,
+            len(event.readme),
+        )
+
+
+def decode_readme_payload(data: dict[str, Any], *, max_chars: int = README_MAX_CHARS) -> str:
+    """Decode GitHub's /readme JSON (base64) and trim for the prompt."""
+    encoding = str(data.get("encoding") or "").lower()
+    content = data.get("content")
+    if encoding == "base64" and isinstance(content, str) and content.strip():
+        try:
+            raw = base64.b64decode(content).decode("utf-8", errors="replace")
+        except (ValueError, TypeError):
+            raw = ""
+    elif isinstance(content, str):
+        raw = content
+    else:
+        raw = str(data.get("text") or "")
+    text = raw.strip()
+    if not text:
+        return ""
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars].rstrip() + "\n…"
 
 
 def extract_features(

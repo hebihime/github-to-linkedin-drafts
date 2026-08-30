@@ -137,9 +137,11 @@ scoring:
 llm:
   # gemini (default) | openai | grok | openrouter | openai_compatible
   provider: gemini
-  model: gemini-2.5-flash
+  model: gemini-3.7-flash
   temperature: 0.65
-  max_output_tokens: 2048
+  max_output_tokens: 8192
+  # Gemini 3.x: low | medium | high. 3.7 rejects "minimal" and thinking_budget=0.
+  thinking_level: medium
   # For openai / grok / openrouter / openai_compatible:
   # base_url: https://api.openai.com/v1
   # api_key_env: OPENAI_API_KEY

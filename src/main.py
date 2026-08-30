@@ -14,7 +14,12 @@ from dotenv import load_dotenv
 
 from .collect import collect_activity
 from .config import AppConfig, load_config
-from .features import enrich_diff_stats, enrich_repo_metadata, extract_features
+from .features import (
+    enrich_diff_stats,
+    enrich_generation_context,
+    enrich_repo_metadata,
+    extract_features,
+)
 from .filter import apply_hard_filters, apply_size_filters, drop_redundant_tag_creates
 from .generate import GenerationError, generate_draft
 from .github_client import GitHubClient, GitHubError, gh_username, read_token, write_token
@@ -173,6 +178,7 @@ def _pipeline(
     produced = 0
     for candidate in candidates:
         try:
+            enrich_generation_context(candidate, read_client)
             draft = generate_draft(candidate, cfg)
         except GenerationError as exc:
             log.error("Generation failed for %s: %s", candidate.lead.event.id, exc)

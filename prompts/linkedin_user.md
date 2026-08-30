@@ -9,6 +9,7 @@ High confidence: {high_confidence}
 
 Lead event
 - Type: {lead_type}
+- New repository: {lead_is_new_repo}
 - Repo: {lead_repo}
 - Title: {lead_title}
 - URL: {lead_url}
@@ -33,5 +34,10 @@ Supporting events in the same repo (context only — do not write a separate pos
 {supporting}
 
 Repo description: {repo_description}
+
+Repo README (generation context — the thesis lives here when the event body is thin; not a changelog):
+{repo_readme}
+
+If New repository is yes: write the bet. Do not inventory files. Do not write a generic explainer for a protocol named in the brief. Lead with why the repo exists. Use the README as the spine if it has one.
 
 Remember: facts only from this brief. First person. 150–350 words. JSON with post_text and reasoning.

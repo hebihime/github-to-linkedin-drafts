@@ -18,7 +18,7 @@ Pipeline files, in order: `src/collect.py` → `src/filter.py` → `src/features
 ## Design decisions — do not reverse these
 
 1. **Scoring is deterministic and completely separate from the LLM.** The model never decides whether something is worth posting. Do not add “ask the model if this is interesting” shortcuts, embeddings-as-judgment, or hidden LLM classifiers.
-2. **Gemini Flash is the default LLM** (`llm.provider: gemini`, `llm.model: gemini-2.5-flash`). Free-tier Gemini is sufficient. Other providers are a config switch, not a new pipeline.
+2. **Gemini Flash is the default LLM** (`llm.provider: gemini`, `llm.model: gemini-3.7-flash`). Free-tier Gemini is sufficient. Other providers are a config switch, not a new pipeline. Do not send `thinking_budget=0` to 3.7 — it rejects it; use `thinking_level` (`low` / `medium` / `high`).
 3. **Draft-only by default.** `linkedin.auto_post` must stay `false` unless the operator explicitly enables it. Do not “helpfully” turn it on.
 4. **One central repository covers all of the user’s GitHub activity** through `GET /users/{username}/events`. Do not change the collector to “repos listed in this org” as the primary source.
 5. **A new public repo is draft-worthy.** `CreateEvent` with `ref_type=repository` is kept and scored at `NewRepository` (default 55). Branch creates stay dropped. Do not treat “I made a repo” as noise.
@@ -97,7 +97,7 @@ Important keys in `config.yaml`: `github.username`, `github.lookback_hours`, `sc
 
 Secrets (env, never yaml): `GEMINI_API_KEY` or `GOOGLE_API_KEY`; `GITHUB_TOKEN` / `GH_PAT`; optional `OPENAI_API_KEY`, `XAI_API_KEY`, `OPENROUTER_API_KEY`; optional `LINKEDIN_ACCESS_TOKEN` + `LINKEDIN_PERSON_URN`.
 
-Prompts: `prompts/linkedin_system.md` and `prompts/linkedin_user.md`. Edit those files to change voice — not `generate.py`.
+Prompts: `prompts/linkedin_system.md` and `prompts/linkedin_user.md`. Edit those files to change voice — not `generate.py`. New-repo drafts must lead with why the project exists (README as generation-only context). Do not let the model mash nearby keywords into a generic protocol explainer.
 
 ## What not to change lightly
 

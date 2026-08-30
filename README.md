@@ -36,7 +36,7 @@ Required workflow permissions (already set in the YAML): `contents: write` (stat
 2. Create an API key. The free tier is enough for this project (one short JSON generation on days you actually shipped).
 3. Store it as `GEMINI_API_KEY` (Actions secret, or `.env` locally). `GOOGLE_API_KEY` is accepted as an alias.
 
-Default model: `gemini-2.5-flash` (stable Flash, configured in `config.yaml`). Current Flash aliases such as `gemini-3.5-flash` or `gemini-3.7-flash` work — change `llm.model` if you want a newer one.
+Default model: `gemini-3.7-flash` (configured in `config.yaml`), with `thinking_level: medium`. Gemini 3.7 rejects `thinking_budget=0` / `minimal`. Older Flash ids still work if you pin `llm.model`.
 
 ## Run locally
 
@@ -117,11 +117,13 @@ Every issue includes a **score components** table. Tune against real drafts, not
 The model is a ghostwriter, not a judge. Voice lives in markdown, not code:
 
 - [`prompts/linkedin_system.md`](prompts/linkedin_system.md) — persona, constraints, banned phrases, JSON shape
-- [`prompts/linkedin_user.md`](prompts/linkedin_user.md) — the brief (score, events, features)
+- [`prompts/linkedin_user.md`](prompts/linkedin_user.md) — the brief (score, events, features, README)
 
 Paths are `llm.system_prompt_path` / `llm.user_prompt_path` in config. Keep the JSON contract (`post_text`, `reasoning`) or update `src/generate.py`’s parser to match.
 
-Target: 150–350 words, first person, impact-focused, no hashtag dump.
+Target: 150–350 words, first person, **thesis-first** (especially for new public repos). The README is fetched after scoring and attached only to the generation brief so the model can explain why the project exists instead of concatenating keywords. Scoring still never sees the README.
+
+If a draft reads like a Wikipedia intro to a protocol named in the repo, the prompt — not the scorer — is wrong.
 
 ## How to switch LLM providers
 
@@ -130,7 +132,7 @@ Target: 150–350 words, first person, impact-focused, no hashtag dump.
 ```yaml
 llm:
   provider: gemini          # gemini | openai | grok | openrouter | openai_compatible
-  model: gemini-2.5-flash   # change this when you change provider
+  model: gemini-3.7-flash   # change this when you change provider
 ```
 
 | `provider` | Env var | Default base URL |
