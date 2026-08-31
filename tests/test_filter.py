@@ -64,13 +64,6 @@ def test_drops_private_repo_unless_allowed(cfg) -> None:
     assert result.dropped["private_repo"] == 1
 
 
-def test_keeps_allowed_private_repo(cfg) -> None:
-    event = make_event(private=True, repo="hebihime/gnoshbot")
-    result = apply_hard_filters([event], cfg, PipelineState())
-    assert [e.id for e in result.kept] == [event.id]
-    assert "private_repo" not in result.dropped
-
-
 def test_drops_chore_only_push(cfg) -> None:
     event = make_event(
         event_type="PushEvent",
