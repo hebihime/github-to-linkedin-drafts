@@ -6,7 +6,8 @@ github:
   username: "hebihime"
   lookback_hours: 48
   include_private: false
-  allowed_private_repos: []          # e.g. ["you/private-app"]
+  allowed_private_repos:
+    - hebihime/gnoshbot
   output_repo: ""                    # owner/name; empty = GITHUB_REPOSITORY
   only_default_branch_pushes: true
   interesting_event_types:

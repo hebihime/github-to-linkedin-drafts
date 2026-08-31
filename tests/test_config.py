@@ -14,3 +14,5 @@ def test_default_config_loads() -> None:
     assert cfg.scoring.event_type.ReleaseEvent > cfg.scoring.event_type.PullRequestEvent
     assert cfg.scoring.event_type.PullRequestEvent > cfg.scoring.event_type.PushEvent
     assert cfg.scoring.event_type.NewRepository >= cfg.scoring.draft_threshold
+    assert cfg.github.include_private is False
+    assert cfg.github.allowed_private_repos == ("hebihime/gnoshbot",)
