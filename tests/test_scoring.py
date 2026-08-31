@@ -86,7 +86,7 @@ def test_frequency_penalty_zero_after_window(cfg) -> None:
     assert scored.breakdown.components["frequency_penalty"] == 0
 
 
-def test_select_candidates_clusters_by_repo_and_caps(cfg, empty_state) -> None:
+def test_select_candidates_clusters_by_repo(cfg, empty_state) -> None:
     lead = make_event(
         event_id="1",
         event_type="ReleaseEvent",
@@ -118,12 +118,9 @@ def test_select_candidates_clusters_by_repo_and_caps(cfg, empty_state) -> None:
     scored = []
     for event in (lead, support, other):
         scored.append(score_event(event, extract_features(event, cfg, empty_state), cfg))
-    cfg_one = cfg
-    # max_drafts_per_run is 1 in config.yaml
-    candidates = select_candidates(scored, cfg_one)
-    assert len(candidates) == 1
-    assert candidates[0].lead.event.event_type == "ReleaseEvent"
-    assert candidates[0].lead.event.repo_full_name in {"acme/one", "acme/two"}
+    candidates = select_candidates(scored, cfg)
+    assert {c.lead.event.repo_full_name for c in candidates} == {"acme/one", "acme/two"}
+    assert all(c.lead.event.event_type == "ReleaseEvent" for c in candidates)
 
 
 def test_new_repository_clears_draft_threshold(cfg, empty_state) -> None:

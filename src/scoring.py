@@ -75,7 +75,7 @@ def score_events(
 
 
 def select_candidates(scored: list[ScoredEvent], cfg: AppConfig) -> list[Candidate]:
-    """Cluster above-threshold events by repo; keep the top N clusters."""
+    """Cluster above-threshold events by repo. Every cluster is a draft."""
     threshold = cfg.scoring.draft_threshold
     above = [s for s in scored if s.score >= threshold]
     above.sort(key=lambda s: (-s.score, s.event.created_at))
@@ -106,14 +106,7 @@ def select_candidates(scored: list[ScoredEvent], cfg: AppConfig) -> list[Candida
         )
 
     clusters.sort(key=lambda c: -c.score)
-    limited = clusters[: max(1, cfg.output.max_drafts_per_run)]
-    if len(clusters) > len(limited):
-        log.info(
-            "Capped to %s draft(s); %s other high-score cluster(s) skipped this run",
-            len(limited),
-            len(clusters) - len(limited),
-        )
-    return limited
+    return clusters
 
 
 def log_scale(value: float, spec: LogScaleWeight) -> float:

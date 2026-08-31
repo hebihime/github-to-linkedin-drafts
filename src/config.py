@@ -197,7 +197,6 @@ class OutputConfig:
     issue_labels: tuple[str, ...] = ("linkedin-draft",)
     write_markdown: bool = False
     markdown_dir: str = "drafts"
-    max_drafts_per_run: int = 1
 
 
 @dataclass(frozen=True)
@@ -364,7 +363,6 @@ def _parse_config(raw: dict[str, Any]) -> AppConfig:
         issue_labels=_str_tuple(out.get("issue_labels"), OutputConfig.issue_labels),
         write_markdown=bool(out.get("write_markdown", False)),
         markdown_dir=str(out.get("markdown_dir") or "drafts"),
-        max_drafts_per_run=int(out.get("max_drafts_per_run", 1)),
     )
 
     li = raw.get("linkedin") or {}

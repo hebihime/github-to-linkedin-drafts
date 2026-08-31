@@ -154,7 +154,6 @@ output:
     - linkedin-draft
   write_markdown: false
   markdown_dir: drafts
-  max_drafts_per_run: 1
 
 linkedin:
   # Opt-in. Leave false unless you have LINKEDIN_ACCESS_TOKEN configured.

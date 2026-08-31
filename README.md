@@ -98,7 +98,7 @@ Components are added, then clamped to `[0, 100]`. Log-scaled terms reach full we
 | Frequency penalty | up to −15 inside 24h of last draft | Stops a ship-day flood |
 | Non-default branch | −6 | Push to `main`/`master` preferred |
 
-Thresholds: **55** draft generation, **75** high confidence (shown on the issue). One draft per run by default (`output.max_drafts_per_run`), clustered by repo.
+Thresholds: **55** draft generation, **75** high confidence (shown on the issue). Above-threshold events cluster by repo (one draft per repo per run). Every cluster drafts; the frequency penalty is the flood control, not a hard cap.
 
 ## How to tune the scorer
 
@@ -221,7 +221,7 @@ See [`config.yaml`](config.yaml) for the full set. High-signal keys:
 - `filters.min_lines_changed` / `filters.drop_commit_types` / `filters.bot_authors`
 - `scoring.draft_threshold` / `scoring.high_confidence_threshold` / `scoring.event_type.*`
 - `llm.provider` / `llm.model` / prompt paths
-- `output.max_drafts_per_run` / `output.create_github_issue`
+- `output.create_github_issue`
 - `linkedin.auto_post` (keep `false` unless you mean it)
 
 CLI flags: `--config`, `--dry-run`, `--score-only`, `--lookback-hours`, `--no-state-write`, `-v`.
